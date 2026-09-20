@@ -17,7 +17,8 @@ Two programs are built from this repository:
 
 ## Installing
 
-Run `RadioTrackSplitter-Setup-<version>.exe` (see [Building the installer](#building-the-installer)).
+Run `RadioTrackSplitter-Setup-<version>.exe`.
+
 It installs per user, without admin rights, into
 `%LOCALAPPDATA%\Programs\Radio Track Splitter` and downloads two things next to
 the executables:
@@ -37,7 +38,7 @@ radio-track-splitter-cli.exe recording.mp3 --dry-run                # just print
 radio-track-splitter-cli.exe recording.mp3 -o D:\tracks             # choose another output folder
 ```
 
-Tracks are written to `%USERPROFILE%\Music\Splitter` by default (the editor's
+Tracks are written to `%USERPROFILE%\Music\RadioTrackSplitter` by default (the editor's
 output folder box, and the CLI's `-o`, change that). They are named after the
 recording and keep its file type: `<recording name>_track_001.mp3` for an mp3,
 `..._001.m4a` for an m4a. The CLI's `--prefix` replaces the
@@ -138,10 +139,11 @@ The installer is not code-signed, so Windows SmartScreen will warn when it is ru
 
 ## Building on GitHub Actions
 
-`.github/workflows/build-installer.yml` builds the installer on a Windows runner for every
-push to `main`, every pull request, and on demand (Actions tab, "Run workflow"). It runs
-`cargo test --release`, then `installer\build.ps1`, then `installer\verify.ps1`, and uploads
-`RadioTrackSplitter-Setup-<version>.exe` as the `RadioTrackSplitter-Setup` artifact of the run.
+`.github/workflows/build-installer.yml` builds the installer on a Windows runner, but **only
+when a version tag is pushed** (`v0.1.2`, `v0.2.0-beta.1`, ...). Ordinary pushes and pull
+requests do not start it. It runs `cargo test --release`, then `installer\build.ps1`, then
+`installer\verify.ps1`, and uploads `RadioTrackSplitter-Setup-<version>.exe` as the
+`RadioTrackSplitter-Setup` artifact of the run.
 
 `verify.ps1` fails the build if the installer's version differs from `Cargo.toml`, or if the
 exes need the Visual C++ runtime (which means `.cargo/config.toml` was not applied; keep that
@@ -154,9 +156,7 @@ git tag v0.1.2
 git push origin v0.1.2
 ```
 
-The tag must be `v` plus the `Cargo.toml` version, otherwise the build fails. A tag build
-also attaches the installer to a **draft** release, so nothing is public until you review
-and publish that draft on GitHub.
-
-The exes are 64-bit (`x86_64-pc-windows-msvc`); the installer stub that wraps them is NSIS's
-usual 32-bit one, which runs on any Windows.
+The tag must be `v` plus the `Cargo.toml` version, otherwise the build fails. The build
+then attaches the installer to a **draft** release, so nothing is public until you review
+and publish that draft on GitHub. Tests therefore run only at release time; run
+`cargo test` yourself before tagging.

@@ -1,0 +1,78 @@
+name: Build installer
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch/PR makes an older, still running build pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    name: Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      # The runner image ships a current stable Rust and Chocolatey, but no NSIS.
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install NSIS
+        run: choco install nsis --no-progress -y
+
+      # Release profile so the (slow to compile) dependencies are built once and reused
+      # by the installer build below; they are optimised in every profile anyway.
+      - name: Test
+        run: cargo test --release
+
+      # Builds the release exes and packages them; the version comes from Cargo.toml.
+      # Windows PowerShell with the policy bypassed, as documented in the README.
+      - name: Build installer
+        shell: cmd
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File installer\build.ps1
+
+      - name: Verify the build
+        shell: cmd
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File installer\verify.ps1
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: RadioTrackSplitter-Setup
+          path: dist/RadioTrackSplitter-Setup-*.exe
+          if-no-files-found: error
+
+  # Pushing a tag such as v0.1.2 (it must match the version in Cargo.toml, see
+  # installer\verify.ps1) attaches the installer to a draft release. Nothing goes public
+  # until you publish the draft.
+  release:
+    name: Draft release
+    needs: installer
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: RadioTrackSplitter-Setup
+          path: dist
+
+      - name: Create or update the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.exe --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" dist/*.exe --draft --title "$TAG" --generate-notes --repo "$GITHUB_REPOSITORY"
+          fi

@@ -1,6 +1,10 @@
 ﻿# Builds the release binaries and packages them into dist\RadioTrackSplitter-Setup-<version>.exe.
+# The version comes from Cargo.toml (the single source of truth); nothing else defines it.
 # Requires NSIS (winget install NSIS.NSIS) and the Rust toolchain.
-param([switch]$SkipCargo)
+#   -SkipCargo       package the binaries already in target\release
+#   -ForceDownloads  test build (dist\...-test.exe) that never skips the weights download
+#                    just because the file is already on this PC
+param([switch]$SkipCargo, [switch]$ForceDownloads)
 
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
@@ -41,9 +45,24 @@ if (-not $SkipCargo) {
     finally { Pop-Location; $ErrorActionPreference = 'Stop' }
 }
 
-$version = (Select-String -Path (Join-Path $root 'Cargo.toml') -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-New-Item -ItemType Directory (Join-Path $root 'dist') -Force | Out-Null
+# Ask cargo rather than parsing Cargo.toml by hand.
+Push-Location $root
+try { $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json; if ($LASTEXITCODE) { throw "cargo metadata failed" } }
+finally { Pop-Location }
+$packages = @($metadata.packages)
+if ($packages.Count -ne 1) { throw "expected one package in Cargo.toml, found $($packages.Count)" }
+$version = $packages[0].version
+if (-not $version) { throw "could not read the package version from Cargo.toml" }
+# The Windows version resource only takes numbers: 0.2.0-beta -> 0.2.0.
+$versionNum = $version -replace '[-+].*$', ''
+if ($versionNum -notmatch '^\d+\.\d+\.\d+$') { throw "Cargo.toml version '$version' is not major.minor.patch" }
 
-& $makensis /V2 "/DVERSION=$version" (Join-Path $here 'radio_track_splitter.nsi')
+New-Item -ItemType Directory (Join-Path $root 'dist') -Force | Out-Null
+$suffix = if ($ForceDownloads) { '-test' } else { '' }
+$outFile = Join-Path $root "dist\RadioTrackSplitter-Setup-$version$suffix.exe"
+
+$defs = @("/DVERSION=$version", "/DVERSION_NUM=$versionNum", "/DOUTFILE=$outFile")
+if ($ForceDownloads) { $defs += '/DFORCE_DOWNLOADS' }
+& $makensis /V2 @defs (Join-Path $here 'radio_track_splitter.nsi')
 if ($LASTEXITCODE) { throw "makensis failed" }
-Get-Item (Join-Path $root "dist\RadioTrackSplitter-Setup-$version.exe") | Select-Object FullName, Length
+Get-Item $outFile | Select-Object FullName, Length

@@ -1,9 +1,10 @@
-//! Split a long radio-recording mp3 into per-track files using VGGish
+//! Split a long radio recording into per-track files using VGGish
 //! embeddings to detect track changes (Rust port of split_radio_nn.py).
 //!
 //! Novelty is computed at several time scales and combined with min(), so a
 //! boundary must stand out at every scale; each boundary is then snapped to the
-//! nearest quiet moment and the tracks are cut losslessly with ffmpeg.
+//! nearest quiet moment and the tracks are cut losslessly with ffmpeg, in the
+//! recording's own format (no re-encoding, no resampling).
 //! For manual editing of the cut points use the `radio-track-splitter` GUI.
 
 use anyhow::{bail, Context, Result};
@@ -15,7 +16,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "radio-track-splitter-cli", version, about)]
 struct Args {
-    /// Input mp3 file (radio stream recording)
+    /// Input recording (mp3, m4a, flac, ogg, wav, ...); the tracks keep its format
     input: PathBuf,
     /// Output folder (default: <user profile>\Music\Splitter)
     #[arg(short, long)]

@@ -5,41 +5,27 @@ use std::time::UNIX_EPOCH;
 
 const MAGIC: &[u8; 8] = b"VGGCACH1";
 
-/// Candidate cache files for `input`, best first: next to the executable, then the
-/// per-user data folder (in case the install folder is read-only). The name is
-/// derived from the input's full path, so each recording has its own file.
-pub fn locations(input: &Path) -> Vec<PathBuf> {
+/// The cache file for `input`: `%TEMP%\radio-track-splitter\vggish_cache_<hash>.bin`. It
+/// holds only recomputable data, so the temp folder is the right home (Windows may clear
+/// it, which just costs a recompute). The name is derived from the input's full path, so
+/// each recording has its own file.
+pub fn cache_path(input: &Path) -> PathBuf {
     let canonical = input.canonicalize().unwrap_or_else(|_| input.to_path_buf());
     // FNV-1a: stable across Rust versions, unlike std's DefaultHasher.
     let hash = canonical
         .to_string_lossy()
         .bytes()
         .fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
-    let name = format!("vggish_cache_{hash:016x}.bin");
-
-    let beside_exe = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf));
-    let user_dir = std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
-        .map(|base| base.join("radio-track-splitter"));
-    beside_exe.into_iter().chain(user_dir).map(|dir| dir.join(&name)).collect()
+    std::env::temp_dir().join("radio-track-splitter").join(format!("vggish_cache_{hash:016x}.bin"))
 }
 
-/// Loads the cached embeddings for `input` from any location, if still valid for the file.
+/// Loads the cached embeddings for `input`, if still valid for the file.
 pub fn load_for(input: &Path, key: (u64, u64)) -> Option<Embeddings> {
-    locations(input).iter().find_map(|p| load(p, key))
+    load(&cache_path(input), key)
 }
 
-/// Saves to the first location that is writable.
 pub fn save_for(input: &Path, key: (u64, u64), emb: &Embeddings) -> Result<()> {
-    let mut last_err = None;
-    for path in locations(input) {
-        match save(&path, key, emb) {
-            Ok(()) => return Ok(()),
-            Err(e) => last_err = Some(e),
-        }
-    }
-    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("no cache location available")))
+    save(&cache_path(input), key, emb)
 }
 
 pub struct Embeddings {
@@ -118,11 +104,12 @@ mod tests {
     }
 
     #[test]
-    fn each_input_gets_its_own_cache_file() {
-        let a = locations(Path::new("a.mp3"));
-        let b = locations(Path::new("b.mp3"));
-        assert!(!a.is_empty());
-        assert_ne!(a[0].file_name(), b[0].file_name());
-        assert_eq!(a[0].file_name(), locations(Path::new("a.mp3"))[0].file_name());
+    fn each_input_gets_its_own_cache_file_in_the_temp_folder() {
+        let a = cache_path(Path::new("a.mp3"));
+        let b = cache_path(Path::new("b.mp3"));
+        assert!(a.starts_with(std::env::temp_dir()), "{a:?}");
+        assert!(a.file_name().unwrap().to_string_lossy().starts_with("vggish_cache_"));
+        assert_ne!(a.file_name(), b.file_name());
+        assert_eq!(a, cache_path(Path::new("a.mp3")), "the same input always maps to the same file");
     }
 }

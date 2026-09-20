@@ -33,10 +33,10 @@ const HEAD: Color32 = Color32::from_rgb(0x4c, 0xaf, 0x50);
 const TEXT: Color32 = Color32::from_rgb(0x9a, 0xa0, 0xa6);
 const RULER_H: f32 = 22.0;
 const APP_NAME: &str = "Radio Track Splitter";
+const ABOUT_SCALE: f32 = 1.5;
 // Shown as links in the About dialog; a link with an empty URL is left out.
-const ABOUT_SCALE: f32 = 2.0;
-const PROJECT_URL: &str = "http://github.com";
-const SUPPORT_URL: &str = "http://github.com";
+const PROJECT_URL: &str = "";
+const SUPPORT_URL: &str = "https://sites.google.com/view/anton-litvinov/donate";
 
 const OVERVIEW_H: f32 = 58.0;
 const HIT_TOLERANCE: f32 = 7.0;
@@ -113,17 +113,12 @@ impl Player {
 
     fn play(&mut self, input: &Path, start: f64, duration: Option<f64>) -> std::io::Result<()> {
         self.stop();
-        let mut cmd = Command::new("ffplay");
+        let mut cmd = audio::quiet_command("ffplay");
         cmd.args(["-nodisp", "-autoexit", "-loglevel", "quiet", "-ss", &format!("{start:.3}")]);
         if let Some(d) = duration {
             cmd.args(["-t", &format!("{d:.3}")]);
         }
         cmd.arg(input).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000);
-        }
         self.child = Some(cmd.spawn()?);
         self.from = start;
         self.started = Instant::now();
@@ -182,6 +177,47 @@ struct App {
     dirty: bool,
     overview: Option<(usize, Vec<(f32, f32)>)>,
     about_open: bool,
+    /// Counts openings of the About dialog; each one is a fresh window (see `centered_dialog`).
+    about_serial: u32,
+    /// Where the waveform was drawn last frame; the About dialog centres on it.
+    signal_rect: Rect,
+    /// The title currently set on the window (see `title_update`).
+    title: String,
+}
+
+/// Window title: the program name, then the open recording's file name (no folder).
+fn window_title(input: Option<&Path>) -> String {
+    match input.and_then(|path| path.file_name()) {
+        Some(name) => format!("{APP_NAME} - {}", name.to_string_lossy()),
+        None => APP_NAME.to_string(),
+    }
+}
+
+/// The new window title if it differs from `current` (which is then updated), else `None`,
+/// so the title is only sent to the window when the open file actually changes.
+fn title_update(current: &mut String, input: Option<&Path>) -> Option<String> {
+    let title = window_title(input);
+    (title != *current).then(|| {
+        current.clone_from(&title);
+        title
+    })
+}
+
+/// A dialog that appears centred on `center` and can then be dragged by its title bar
+/// (which `.anchor()` / `.fixed_pos()` would prevent).
+///
+/// `serial` is part of the window's identity: use a new number for every opening. egui
+/// remembers a window's position under its id, and a window that already has a remembered
+/// position ignores `default_pos` (and, in this egui version, `current_pos` too), so
+/// reusing the id would bring the dialog back wherever it was last left instead of
+/// centred again.
+fn centered_dialog<'a>(title: impl Into<egui::WidgetText>, serial: u32, center: Pos2) -> egui::Window<'a> {
+    egui::Window::new(title)
+        .id(egui::Id::new(("dialog", serial)))
+        .collapsible(false)
+        .resizable(false)
+        .pivot(Align2::CENTER_CENTER)
+        .default_pos(center)
 }
 
 /// egui's own link opening is not compiled into this build, so hand the URL to
@@ -193,7 +229,7 @@ fn open_url(url: &str) {
 impl App {
     fn new(initial: Option<PathBuf>, ctx: &egui::Context) -> Self {
         let (tx, rx) = mpsc::channel();
-        let has_ffplay = Command::new("ffplay")
+        let has_ffplay = audio::quiet_command("ffplay")
             .arg("-version")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -223,6 +259,9 @@ impl App {
             dirty: false,
             overview: None,
             about_open: false,
+            about_serial: 0,
+            signal_rect: Rect::ZERO,
+            title: APP_NAME.to_string(), // what run_native starts the window with
         };
         if let Some(path) = initial {
             app.open(path, ctx);
@@ -355,12 +394,14 @@ impl App {
         }
         let out = PathBuf::from(&self.out_dir);
         let prefix = audio::default_prefix(&input);
+        let ext = audio::output_extension(&input);
+        let dot_ext = format!(".{}", ext.to_lowercase());
         let existing = std::fs::read_dir(&out)
             .map(|rd| {
                 rd.filter_map(Result::ok)
                     .filter(|e| {
                         let n = e.file_name().to_string_lossy().to_string();
-                        n.starts_with(&prefix) && n.ends_with(".mp3")
+                        n.starts_with(&prefix) && n.to_lowercase().ends_with(&dot_ext)
                     })
                     .count()
             })
@@ -369,7 +410,7 @@ impl App {
             && rfd::MessageDialog::new()
                 .set_title("Export")
                 .set_description(format!(
-                    "{} already contains {existing} files named {prefix}*.mp3.\n\
+                    "{} already contains {existing} files named {prefix}*.{ext}.\n\
                      Files with the same names are overwritten and any extra old ones stay.\n\nContinue?",
                     out.display()
                 ))
@@ -547,6 +588,9 @@ impl App {
             ui.add(egui::TextEdit::singleline(&mut self.minlen).desired_width(40.0));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("About").clicked() {
+                    if !self.about_open {
+                        self.about_serial += 1; // a fresh window, centred again
+                    }
                     self.about_open = true;
                 }
                 ui.separator();
@@ -587,13 +631,11 @@ impl App {
         big.spacing.icon_width_inner *= ABOUT_SCALE;
         big.spacing.window_margin = egui::Margin::same((8.0 * ABOUT_SCALE) as i8);
         ctx.set_global_style(big);
-        egui::Window::new(format!("About {APP_NAME}"))
+
+        // Centre on the waveform (the whole window until it has been drawn once).
+        let center = if self.signal_rect.width() > 0.0 { self.signal_rect.center() } else { ctx.content_rect().center() };
+        centered_dialog(format!("About {APP_NAME}"), self.about_serial, center)
             .open(&mut self.about_open)
-            .collapsible(false)
-            .resizable(false)
-            // Start centred, but (unlike .anchor) stay draggable by the title bar.
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(ctx.content_rect().center())
             .show(ctx, |ui| {
                 // Wide enough for the title bar and the text without wrapping.
                 ui.set_min_width(300.0 * ABOUT_SCALE);
@@ -720,6 +762,7 @@ impl App {
     fn waveform(&mut self, ui: &mut egui::Ui, size: Vec2) {
         let (resp, painter) = ui.allocate_painter(size, Sense::click_and_drag());
         let rect = resp.rect;
+        self.signal_rect = rect;
         painter.rect_filled(rect, 0.0, BG);
         let Some(env) = self.env.clone() else {
             painter.text(rect.center(), Align2::CENTER_CENTER, "Open a recording to begin", FontId::proportional(16.0), TEXT);
@@ -954,6 +997,9 @@ impl eframe::App for App {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
         let ctx = &ctx;
+        if let Some(title) = title_update(&mut self.title, self.input.as_deref()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        }
         egui::Panel::top("toolbar").show(root, |ui| self.toolbar(ui, ctx));
         egui::Panel::bottom("status").show(root, |ui| {
             ui.horizontal(|ui| {
@@ -997,4 +1043,127 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
     eframe::run_native(APP_NAME, options, Box::new(move |cc| Ok(Box::new(App::new(initial, &cc.egui_ctx)))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One real egui frame with the app's dialog builder; returns the window's rectangle.
+    fn frame(ctx: &egui::Context, center: Pos2, serial: u32, time: f64, events: Vec<egui::Event>) -> Rect {
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 700.0))),
+            time: Some(time),
+            events,
+            ..Default::default()
+        };
+        let mut rect = Rect::NOTHING;
+        let output = ctx.run_ui(input, |ui| {
+            let shown = centered_dialog("About", serial, center).show(ui.ctx(), |ui| {
+                ui.set_min_width(300.0);
+                ui.label("Radio Track Splitter");
+            });
+            if let Some(r) = shown {
+                rect = r.response.rect;
+            }
+        });
+        // Nothing renders here; egui insists the frame's texture uploads are dropped explicitly.
+        output.drop_without_applying_deltas();
+        rect
+    }
+
+    /// Frames with no input (the first one only measures the window).
+    fn settle(ctx: &egui::Context, center: Pos2, serial: u32) -> Rect {
+        let mut rect = Rect::NOTHING;
+        for i in 0..3 {
+            rect = frame(ctx, center, serial, i as f64 * 0.02, vec![]);
+        }
+        rect
+    }
+
+    fn assert_centered_on(rect: Rect, center: Pos2) {
+        let off = (rect.center() - center).abs();
+        assert!(off.x < 1.5 && off.y < 1.5, "window centre {:?}, wanted {center:?}", rect.center());
+    }
+
+    #[test]
+    fn dialog_opens_centered_on_the_requested_point() {
+        let ctx = egui::Context::default();
+        let center = Pos2::new(640.0, 300.0);
+        assert_centered_on(settle(&ctx, center, 1), center);
+    }
+
+    #[test]
+    fn dialog_can_be_dragged_by_its_title_bar_and_then_stays_put() {
+        use egui::{Event, Modifiers, PointerButton};
+        let ctx = egui::Context::default();
+        let center = Pos2::new(640.0, 300.0);
+        let rect = settle(&ctx, center, 1);
+
+        // Grab the title bar (near the top of the window) and pull the window by (+80, +50).
+        let grab = Pos2::new(rect.center().x, rect.top() + 12.0);
+        let by = Vec2::new(80.0, 50.0);
+        let button = |pressed| Event::PointerButton { pos: grab, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+        let mut t = 1.0;
+        let mut step = |events: Vec<Event>| {
+            t += 0.02;
+            frame(&ctx, center, 1, t, events)
+        };
+        step(vec![Event::PointerMoved(grab)]);
+        step(vec![button(true)]);
+        step(vec![Event::PointerMoved(grab + by * 0.5)]);
+        step(vec![Event::PointerMoved(grab + by)]);
+        step(vec![Event::PointerButton { pos: grab + by, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }]);
+        let moved = step(vec![]);
+
+        let shift = moved.center() - rect.center();
+        assert!((shift - by).length() < 2.0, "dragged window moved by {shift:?}, expected {by:?}");
+
+        // Later frames (the signal pane moving, the app redrawing) must not pull it back.
+        let later = frame(&ctx, Pos2::new(300.0, 200.0), 1, 2.0, vec![]);
+        assert_centered_on(later, moved.center());
+    }
+
+    #[test]
+    fn a_new_opening_is_centered_on_the_current_point() {
+        let ctx = egui::Context::default();
+        let first = Pos2::new(640.0, 300.0);
+        assert_centered_on(settle(&ctx, first, 1), first);
+
+        // Opened again (new serial) over a signal pane that is now elsewhere.
+        let second = Pos2::new(400.0, 200.0);
+        assert_centered_on(settle(&ctx, second, 2), second);
+    }
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::*;
+
+    #[test]
+    fn title_is_the_program_name_and_the_file_name_without_its_folder() {
+        assert_eq!(window_title(None), "Radio Track Splitter");
+        assert_eq!(
+            window_title(Some(Path::new(r"C:\Users\anton\Music\Morning Show 2026.mp3"))),
+            "Radio Track Splitter - Morning Show 2026.mp3"
+        );
+        // The extension stays; only the folder is dropped.
+        assert_eq!(window_title(Some(Path::new("clip.m4a"))), "Radio Track Splitter - clip.m4a");
+        // A path with no file name (e.g. a drive root) falls back to the plain name.
+        assert_eq!(window_title(Some(Path::new(r"C:\"))), "Radio Track Splitter");
+    }
+
+    #[test]
+    fn the_title_is_only_sent_when_it_changes() {
+        let mut current = APP_NAME.to_string();
+        assert_eq!(title_update(&mut current, None), None, "nothing open: already correct");
+
+        let a = Path::new(r"D:\rec\a.mp3");
+        assert_eq!(title_update(&mut current, Some(a)).as_deref(), Some("Radio Track Splitter - a.mp3"));
+        assert_eq!(title_update(&mut current, Some(a)), None, "same file: no repeat");
+
+        let b = Path::new(r"D:\rec\b.flac");
+        assert_eq!(title_update(&mut current, Some(b)).as_deref(), Some("Radio Track Splitter - b.flac"));
+        assert_eq!(current, "Radio Track Splitter - b.flac");
+    }
 }

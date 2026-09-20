@@ -13,8 +13,14 @@ SetCompressor /SOLID lzma
 RequestExecutionLevel user
 ManifestDPIAware true
 
+; The version is defined only in Cargo.toml. build.ps1 reads it and passes /DVERSION
+; (as written there, e.g. 0.2.0-beta) and /DVERSION_NUM (its x.y.z part, which the
+; Windows version resource needs). There is deliberately no default here.
 !ifndef VERSION
-  !define VERSION "0.0.0"
+  !error "VERSION is not defined. Build with installer\build.ps1; it takes the version from Cargo.toml."
+!endif
+!ifndef VERSION_NUM
+  !error "VERSION_NUM is not defined. Build with installer\build.ps1."
 !endif
 
 !define NAME      "Radio Track Splitter"
@@ -38,7 +44,7 @@ OutFile "${OUTFILE}"
 InstallDir "$LOCALAPPDATA\Programs\${NAME}"
 InstallDirRegKey HKCU "${APPKEY}" "InstallDir"
 
-VIProductVersion "${VERSION}.0"
+VIProductVersion "${VERSION_NUM}.0"
 VIAddVersionKey "ProductName" "${NAME}"
 VIAddVersionKey "FileDescription" "${NAME} installer"
 VIAddVersionKey "LegalCopyright" "Radio Track Splitter"
@@ -213,10 +219,14 @@ Section "Uninstall"
   Delete "$INSTDIR\ffprobe.exe"
   Delete "$INSTDIR\ffplay.exe"
   Delete "$INSTDIR\${WEIGHTS_NAME}"
-  Delete "$INSTDIR\vggish_cache_*.bin" ; embeddings cached by the app
+  Delete "$INSTDIR\vggish_cache_*.bin" ; written here by earlier versions
   Delete "$INSTDIR\${WEIGHTS_NAME}.partial"
   Delete "$INSTDIR\Uninstall.exe"
   Delete "$SMPROGRAMS\${NAME}.lnk"
+
+  ; Embedding caches now live in the user's temp folder.
+  Delete "$TEMP\radio-track-splitter\vggish_cache_*.bin"
+  RMDir "$TEMP\radio-track-splitter"
 
   DeleteRegKey HKCU "${REGKEY}"
   DeleteRegKey HKCU "${APPKEY}"

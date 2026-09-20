@@ -6,7 +6,6 @@ use candle_core::{DType, Device, Module, Tensor};
 use candle_nn::{conv2d, linear, Conv2d, Conv2dConfig, Linear, VarBuilder};
 use rustfft::{num_complex::Complex, FftPlanner};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::cache::Embeddings;
 
@@ -176,7 +175,7 @@ pub fn ensure_weights(explicit: Option<PathBuf>) -> Result<PathBuf> {
     println!("Downloading VGGish weights to {} ...", own.display());
     std::fs::create_dir_all(&own_dir)?;
     let partial = own.with_extension("partial");
-    let status = Command::new("curl")
+    let status = crate::audio::quiet_command("curl")
         .args(["-L", "--fail", "-o"])
         .arg(&partial)
         .arg(WEIGHTS_URL)

@@ -1,9 +1,12 @@
 # Radio Track Splitter
 
-Splits a long radio-stream recording (e.g. an mp3) into separate track files. A
+Splits a long stream recording (e.g. an mp3) into separate track files. A
 VGGish neural network finds where one track changes to the next, each cut is
 snapped to the nearest quiet moment, and the tracks are written losslessly with
-FFmpeg (`-c copy`, no re-encoding).
+FFmpeg in the recording's own format: an mp3 gives mp3 tracks, an m4a gives m4a
+tracks, and so on. The audio is copied as it is, never resampled or re-encoded
+(the one exception is FLAC, which is re-encoded losslessly so the tracks get a
+correct length; the decoded audio is identical).
 
 Two programs are built from this repository:
 
@@ -36,15 +39,16 @@ radio-track-splitter-cli.exe recording.mp3 -o D:\tracks             # choose ano
 
 Tracks are written to `%USERPROFILE%\Music\Splitter` by default (the editor's
 output folder box, and the CLI's `-o`, change that). They are named after the
-recording: `<recording name>_track_001.mp3`. The CLI's `--prefix` replaces the
+recording and keep its file type: `<recording name>_track_001.mp3` for an mp3,
+`..._001.m4a` for an m4a. The CLI's `--prefix` replaces the
 `<recording name>_track_` part. Run
 `radio-track-splitter-cli.exe --help` for all options (`--sensitivity`,
 `--min-track-length`, `--snap-window`, `--weights`, ...).
 
-The slow neural-network step is cached per recording, in `vggish_cache_<hash>.bin`
-next to the executable (or in `%LOCALAPPDATA%\radio-track-splitter` if that folder
-isn't writable). Reopening the same, unmodified file skips it. Deleting these files
-is always safe.
+The slow neural-network step is cached per recording, in
+`%TEMP%\radio-track-splitter\vggish_cache_<hash>.bin`. Reopening the same, unmodified
+file skips it. These files only hold recomputable data, so deleting them (or Windows
+clearing the temp folder) is always safe; it just costs a recompute.
 
 The app looks for FFmpeg on `PATH` and in its own folder, and for the weights
 next to the executable, then in the torch hub cache, then in
@@ -105,7 +109,10 @@ rebuilding them:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\build.ps1 -SkipCargo
 ```
 
-To release a new version, bump `version` in `Cargo.toml` and run the script.
+To release a new version, bump `version` in `Cargo.toml` and run the script. That is
+the only place the version is defined: the script reads it from cargo and hands it to
+NSIS, and the app (About dialog, `--version`) reads it at compile time. A
+pre-release such as `0.2.0-beta.1` works too.
 
 **Changing the downloaded files**
 
@@ -117,13 +124,39 @@ installer will reject the download.
 **Testing the installer on a PC that already has FFmpeg and the weights**
 
 The installer unticks a download when the file is already present, so to exercise
-the download path build a test variant that skips that check, and install it into
-a throwaway folder:
+the download path build a test variant that skips that check (it is written to
+`dist\RadioTrackSplitter-Setup-<version>-test.exe`), and install it into a
+throwaway folder:
 
 ```powershell
-& "${env:ProgramFiles(x86)}\NSIS\makensis.exe" /DVERSION=0.1.0 /DFORCE_DOWNLOADS /DOUTFILE=C:\temp\test-setup.exe installer\radio_track_splitter.nsi
-C:\temp\test-setup.exe /S /D=C:\temp\inst
+powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\build.ps1 -SkipCargo -ForceDownloads
+.\dist\RadioTrackSplitter-Setup-<version>-test.exe /S /D=C:\temp\inst
 C:\temp\inst\Uninstall.exe /S _?=C:\temp\inst   # uninstall when done
 ```
 
 The installer is not code-signed, so Windows SmartScreen will warn when it is run.
+
+## Building on GitHub Actions
+
+`.github/workflows/build-installer.yml` builds the installer on a Windows runner for every
+push to `main`, every pull request, and on demand (Actions tab, "Run workflow"). It runs
+`cargo test --release`, then `installer\build.ps1`, then `installer\verify.ps1`, and uploads
+`RadioTrackSplitter-Setup-<version>.exe` as the `RadioTrackSplitter-Setup` artifact of the run.
+
+`verify.ps1` fails the build if the installer's version differs from `Cargo.toml`, or if the
+exes need the Visual C++ runtime (which means `.cargo/config.toml` was not applied; keep that
+file committed). You can run it locally after `build.ps1`.
+
+To publish: bump `version` in `Cargo.toml`, commit, then push a matching tag:
+
+```powershell
+git tag v0.1.2
+git push origin v0.1.2
+```
+
+The tag must be `v` plus the `Cargo.toml` version, otherwise the build fails. A tag build
+also attaches the installer to a **draft** release, so nothing is public until you review
+and publish that draft on GitHub.
+
+The exes are 64-bit (`x86_64-pc-windows-msvc`); the installer stub that wraps them is NSIS's
+usual 32-bit one, which runs on any Windows.

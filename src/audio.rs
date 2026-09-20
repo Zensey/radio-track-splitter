@@ -87,12 +87,12 @@ pub fn read_wav(path: &Path) -> Result<Vec<i16>> {
     Ok(mono)
 }
 
-/// Default output folder: `<user profile>\Music\Splitter` (`tracks` in the current
+/// Default output folder: `<user profile>\Music\RadioTrackSplitter` (`tracks` in the current
 /// folder if the profile folder is unknown).
 pub fn default_output_dir() -> PathBuf {
     std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
-        .map(|home| PathBuf::from(home).join("Music").join("Splitter"))
+        .map(|home| PathBuf::from(home).join("Music").join("RadioTrackSplitter"))
         .unwrap_or_else(|| PathBuf::from("tracks"))
 }
 
@@ -207,7 +207,7 @@ mod tests {
     #[test]
     fn default_output_dir_is_music_splitter() {
         let dir = default_output_dir();
-        assert!(dir.ends_with(Path::new("Music").join("Splitter")) || dir == Path::new("tracks"), "{dir:?}");
+        assert!(dir.ends_with(Path::new("Music").join("RadioTrackSplitter")) || dir == Path::new("tracks"), "{dir:?}");
     }
 
     #[test]

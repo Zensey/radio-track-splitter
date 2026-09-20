@@ -35,7 +35,7 @@ const RULER_H: f32 = 22.0;
 const APP_NAME: &str = "Radio Track Splitter";
 const ABOUT_SCALE: f32 = 1.5;
 // Shown as links in the About dialog; a link with an empty URL is left out.
-const PROJECT_URL: &str = "";
+const PROJECT_URL: &str = "https://github.com/zensey/radio-track-splitter";
 const SUPPORT_URL: &str = "https://sites.google.com/view/anton-litvinov/donate";
 
 const OVERVIEW_H: f32 = 58.0;

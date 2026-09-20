@@ -1,0 +1,13 @@
+# Tested on Python 3.13, Windows.
+# On Windows, torchvggish's setup.py fails with a cp1251/cp1252 UnicodeDecodeError
+# unless Python runs in UTF-8 mode. Install with:
+#   PowerShell:  $env:PYTHONUTF8=1; pip install -r requirements.txt
+#   cmd:         set PYTHONUTF8=1 && pip install -r requirements.txt
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.0
+torchvggish==0.2
+resampy==0.4.3
+librosa==1.0.0
+soundfile==0.14.0
+scipy==1.18.1
+numpy==2.5.3

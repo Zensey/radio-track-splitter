@@ -33,7 +33,7 @@ const HEAD: Color32 = Color32::from_rgb(0x4c, 0xaf, 0x50);
 const TEXT: Color32 = Color32::from_rgb(0x9a, 0xa0, 0xa6);
 const RULER_H: f32 = 22.0;
 const APP_NAME: &str = "Radio Track Splitter";
-const ABOUT_SCALE: f32 = 1.5;
+const ABOUT_SCALE: f32 = 1.0;
 // Shown as links in the About dialog; a link with an empty URL is left out.
 const PROJECT_URL: &str = "https://github.com/zensey/radio-track-splitter";
 const SUPPORT_URL: &str = "https://sites.google.com/view/anton-litvinov/donate";
@@ -638,18 +638,18 @@ impl App {
             .open(&mut self.about_open)
             .show(ctx, |ui| {
                 // Wide enough for the title bar and the text without wrapping.
-                ui.set_min_width(300.0 * ABOUT_SCALE);
+                ui.set_min_width(320.0 * ABOUT_SCALE);
                 ui.vertical_centered(|ui| {
+                    ui.add_space(8.0);
                     ui.heading(APP_NAME);
                     ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
-                    ui.add_space(6.0);
-                    ui.label("Splits long radio recordings into separate tracks.");
-                    ui.add_space(8.0);
-                    for (label, url) in [("Project page", PROJECT_URL), ("Author support page", SUPPORT_URL)] {
+                    ui.add_space(12.0);
+                    for (label, url) in [("Project page", PROJECT_URL), ("Donate", SUPPORT_URL)] {
                         if !url.is_empty() && ui.link(label).on_hover_text(url).clicked() {
                             open_url(url);
                         }
                     }
+                    ui.add_space(8.0);
                 });
             });
         ctx.set_global_style(normal);

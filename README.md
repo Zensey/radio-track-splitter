@@ -1,5 +1,7 @@
 # Radio Track Splitter
 
+![Editor screenshot](assets/screenshot.png)
+
 Splits a long stream recording (e.g. an mp3) into separate track files. A
 VGGish neural network finds where one track changes to the next, each cut is
 snapped to the nearest quiet moment, and the tracks are written losslessly with
@@ -15,13 +17,13 @@ Two programs are built from this repository:
 | Editor (GUI) | `radio-track-splitter.exe` | Waveform editor: auto-detects split points, lets you fix them by hand, listen to each cut, then export |
 | Command line | `radio-track-splitter-cli.exe` | Detects the split points and exports the tracks in one go |
 
+
 ## Installing
 
 Run `RadioTrackSplitter-Setup-<version>.exe`.
 
 It installs per user, without admin rights, into
-`%LOCALAPPDATA%\Programs\Radio Track Splitter` and downloads two things next to
-the executables:
+`%LOCALAPPDATA%\Programs\Radio Track Splitter` and downloads two dependencies:
 
 - **FFmpeg** (`ffmpeg`, `ffprobe`, `ffplay`; about 110 MB)
 - **VGGish weights** `vggish-10086976.pth` (about 275 MB)
@@ -58,14 +60,37 @@ there on first use (needs `curl`, included with Windows 10 and later).
 
 ## Building from source
 
-Requires the [Rust toolchain](https://rustup.rs) (MSVC target on Windows).
+Requires:
+
+- the [Rust toolchain](https://rustup.rs) (MSVC target on Windows)
+- `make`:
+
+  ```powershell
+  winget install ezwinports.make
+  ```
 
 ```powershell
-cargo build --release
+make build
 ```
 
 Executables are written to `target\release\`. The C runtime is linked
 statically (see `.cargo/config.toml`), so no Visual C++ Redistributable is needed.
+
+The `Makefile` wraps the other common commands too:
+
+| Command | What it does |
+|---|---|
+| `make build` | `cargo build --release` |
+| `make test` | `cargo test` (unit tests) |
+| `make clippy` | `cargo clippy --all-targets` |
+| `make fmt` | `cargo fmt` |
+| `make run FILE=recording.mp3` | run the editor, optionally opening `FILE` (`FILE` may be omitted) |
+| `make cli FILE=recording.mp3 CLI_ARGS="-o D:\tracks"` | run the CLI, with any extra args in `CLI_ARGS` |
+| `make dry-run FILE=recording.mp3` | run the CLI with `--dry-run` |
+| `make installer` | build the installer into `dist\` (add `SKIP_CARGO=1` to skip the `cargo build`) |
+| `make installer-test` | build the `-test` installer variant that forces downloads (also takes `SKIP_CARGO=1`) |
+| `make clean` | `cargo clean` and remove `dist\` |
+| `make help` | list all of the above |
 
 ## Building the installer
 
@@ -74,7 +99,7 @@ The installer is an [NSIS](https://nsis.sourceforge.io) script in `installer/`.
 **Prerequisites**
 
 - Windows 10 or later (the installer uses the built-in `curl`, `tar` and `certutil`)
-- Rust toolchain (as above)
+- Rust toolchain and `make` (as above)
 - NSIS 3:
 
   ```powershell
@@ -84,12 +109,8 @@ The installer is an [NSIS](https://nsis.sourceforge.io) script in `installer/`.
 **Build**
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\build.ps1
+make installer
 ```
-
-The `-ExecutionPolicy Bypass` part is needed on a default Windows setup, where
-running `.\installer\build.ps1` directly fails with "running scripts is disabled on
-this system". It applies to this one run only and changes no system setting.
 
 The script:
 
@@ -103,60 +124,10 @@ The script:
 Result: `dist\RadioTrackSplitter-Setup-<version>.exe` (about 7 MB; FFmpeg and the
 weights are downloaded when the installer runs, not embedded).
 
-Use `-SkipCargo` to package the binaries already in `target\release\` without
-rebuilding them:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\build.ps1 -SkipCargo
-```
+Use `make installer SKIP_CARGO=1` to package the binaries already in
+`target\release\` without rebuilding them.
 
 To release a new version, bump `version` in `Cargo.toml` and run the script. That is
 the only place the version is defined: the script reads it from cargo and hands it to
 NSIS, and the app (About dialog, `--version`) reads it at compile time. A
 pre-release such as `0.2.0-beta.1` works too.
-
-**Changing the downloaded files**
-
-FFmpeg and weights URLs and SHA-256 hashes are defined together at the top of
-`installer\radio_track_splitter.nsi` (`FFMPEG_URL`/`FFMPEG_SHA256`,
-`WEIGHTS_URL`/`WEIGHTS_SHA256`). Update the URL and hash together, or the
-installer will reject the download.
-
-**Testing the installer on a PC that already has FFmpeg and the weights**
-
-The installer unticks a download when the file is already present, so to exercise
-the download path build a test variant that skips that check (it is written to
-`dist\RadioTrackSplitter-Setup-<version>-test.exe`), and install it into a
-throwaway folder:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\build.ps1 -SkipCargo -ForceDownloads
-.\dist\RadioTrackSplitter-Setup-<version>-test.exe /S /D=C:\temp\inst
-C:\temp\inst\Uninstall.exe /S _?=C:\temp\inst   # uninstall when done
-```
-
-The installer is not code-signed, so Windows SmartScreen will warn when it is run.
-
-## Building on GitHub Actions
-
-`.github/workflows/build-installer.yml` builds the installer on a Windows runner, but **only
-when a version tag is pushed** (`v0.1.2`, `v0.2.0-beta.1`, ...). Ordinary pushes and pull
-requests do not start it. It runs `cargo test --release`, then `installer\build.ps1`, then
-`installer\verify.ps1`, and uploads `RadioTrackSplitter-Setup-<version>.exe` as the
-`RadioTrackSplitter-Setup` artifact of the run.
-
-`verify.ps1` fails the build if the installer's version differs from `Cargo.toml`, or if the
-exes need the Visual C++ runtime (which means `.cargo/config.toml` was not applied; keep that
-file committed). You can run it locally after `build.ps1`.
-
-To publish: bump `version` in `Cargo.toml`, commit, then push a matching tag:
-
-```powershell
-git tag v0.1.2
-git push origin v0.1.2
-```
-
-The tag must be `v` plus the `Cargo.toml` version, otherwise the build fails. The build
-then attaches the installer to a **draft** release, so nothing is public until you review
-and publish that draft on GitHub. Tests therefore run only at release time; run
-`cargo test` yourself before tagging.

@@ -26,6 +26,10 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tempfile = "3.27.0"
 
+# Without a windowing backend eframe cannot open a window on Linux.
+[target.'cfg(target_os = "linux")'.dependencies]
+eframe = { version = "0.36.2", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
+
 # candle is far too slow unoptimised, so optimise dependencies even in debug/test builds.
 [profile.dev.package."*"]
 opt-level = 3

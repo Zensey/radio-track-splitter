@@ -259,7 +259,9 @@ mod tests {
 
     #[test]
     fn default_prefix_uses_the_input_name() {
+        #[cfg(windows)]
         assert_eq!(default_prefix(Path::new(r"C:\rec\Morning Show 2026-09-20.mp3")), "Morning Show 2026-09-20_track_");
+        assert_eq!(default_prefix(Path::new("rec/Morning Show 2026-09-20.mp3")), "Morning Show 2026-09-20_track_");
         assert_eq!(default_prefix(Path::new("a.b.mp3")), "a.b_track_");
     }
 }

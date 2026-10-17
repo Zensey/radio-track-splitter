@@ -221,9 +221,10 @@ fn centered_dialog<'a>(title: impl Into<egui::WidgetText>, serial: u32, center: 
 }
 
 /// egui's own link opening is not compiled into this build, so hand the URL to
-/// Explorer (which opens the default browser). No shell is involved.
+/// the system opener (Explorer / xdg-open), which opens the default browser. No shell is involved.
 fn open_url(url: &str) {
-    let _ = Command::new("explorer").arg(url).spawn();
+    let opener = if cfg!(windows) { "explorer" } else { "xdg-open" };
+    let _ = Command::new(opener).arg(url).spawn();
 }
 
 impl App {
@@ -1144,13 +1145,13 @@ mod title_tests {
     fn title_is_the_program_name_and_the_file_name_without_its_folder() {
         assert_eq!(window_title(None), "Radio Track Splitter");
         assert_eq!(
-            window_title(Some(Path::new(r"C:\Users\anton\Music\Morning Show 2026.mp3"))),
+            window_title(Some(Path::new("/home/anton/Music/Morning Show 2026.mp3"))),
             "Radio Track Splitter - Morning Show 2026.mp3"
         );
         // The extension stays; only the folder is dropped.
         assert_eq!(window_title(Some(Path::new("clip.m4a"))), "Radio Track Splitter - clip.m4a");
         // A path with no file name (e.g. a drive root) falls back to the plain name.
-        assert_eq!(window_title(Some(Path::new(r"C:\"))), "Radio Track Splitter");
+        assert_eq!(window_title(Some(Path::new("/"))), "Radio Track Splitter");
     }
 
     #[test]
@@ -1158,11 +1159,11 @@ mod title_tests {
         let mut current = APP_NAME.to_string();
         assert_eq!(title_update(&mut current, None), None, "nothing open: already correct");
 
-        let a = Path::new(r"D:\rec\a.mp3");
+        let a = Path::new("/rec/a.mp3");
         assert_eq!(title_update(&mut current, Some(a)).as_deref(), Some("Radio Track Splitter - a.mp3"));
         assert_eq!(title_update(&mut current, Some(a)), None, "same file: no repeat");
 
-        let b = Path::new(r"D:\rec\b.flac");
+        let b = Path::new("/rec/b.flac");
         assert_eq!(title_update(&mut current, Some(b)).as_deref(), Some("Radio Track Splitter - b.flac"));
         assert_eq!(current, "Radio Track Splitter - b.flac");
     }
